@@ -1,0 +1,6 @@
+{
+  "appId": "com.dumpandgo.app",
+  "appName": "Dump and Go",
+  "webDir": "www",
+  "server": { "androidScheme": "https" }
+}

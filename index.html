@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Dump and Go</title>
+<meta name="theme-color" content="#1E6B73">
+</head><body>
+<style>
+/* Layout: one phone-width column. Energy chips, one big "Now" card (task + timer), then collapsed extras. */
+:root{
+  --bg:#EDF0EA; --surface:#F8FAF6; --ink:#17252A; --muted:#566868; --line:#D0D8CF; --chip:#E1E7DE;
+  --accent:#1E6B73; --on-accent:#FFFFFF; --brk:#4B8B3B; --warn:#B4531A;
+  --e0:#6B7A99; --e1:#2E8B8B; --e2:#5E9E3F; --e3:#D98A1F;
+  --sans:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+  --num:ui-rounded,"SF Pro Rounded",Roboto,"Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1A1C; --surface:#162427; --ink:#E6EEEA; --muted:#93A5A3; --line:#28393C; --chip:#21343A;
+    --accent:#5FC0C8; --on-accent:#08191B; --brk:#8CCB6F; --warn:#F0955A;
+    --e0:#8C9AB8; --e1:#52B8B8; --e2:#86C264; --e3:#F0A945;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1A1C; --surface:#162427; --ink:#E6EEEA; --muted:#93A5A3; --line:#28393C; --chip:#21343A;
+  --accent:#5FC0C8; --on-accent:#08191B; --brk:#8CCB6F; --warn:#F0955A;
+  --e0:#8C9AB8; --e1:#52B8B8; --e2:#86C264; --e3:#F0A945;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 var(--sans);-webkit-tap-highlight-color:transparent}
+.app{max-width:560px;margin:0 auto;padding-block:14px 90px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
+header.top{display:flex;justify-content:space-between;align-items:baseline;gap:6px 16px;flex-wrap:wrap}
+h1{font-size:1.3rem;letter-spacing:-.01em;margin:0}
+h2{font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 8px;font-weight:700}
+.stats{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:.85rem}
+.stats b{color:var(--ink);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.banner{background:color-mix(in srgb,var(--warn) 16%,var(--surface));border:1px solid var(--warn);border-radius:10px;padding:10px 14px;font-size:.9rem}
+
+.energy{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.eb{border:2px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 2px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;color:var(--ink);font:inherit;font-size:.84rem;font-weight:650;min-height:64px}
+.eb[aria-checked=true]{border-color:var(--lv);background:color-mix(in srgb,var(--lv) 16%,var(--surface))}
+.bat{display:flex;gap:2px}
+.bat i{width:8px;height:15px;border-radius:2px;background:var(--line)}
+.bat i.on{background:var(--lv)}
+.hint{margin:-8px 0 0;color:var(--muted);font-size:.88rem}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 16px}
+.now{text-align:center}
+.label{font-size:.76rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:700;margin:0 0 6px}
+.task{font-size:1.5rem;line-height:1.25;font-weight:750;margin:2px 0 8px;overflow-wrap:anywhere;text-wrap:balance}
+.chips{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:6px}
+.chip{display:inline-block;font-size:.76rem;padding:1px 9px;border-radius:999px;background:var(--chip);color:var(--ink)}
+.chip.over{background:color-mix(in srgb,var(--warn) 24%,var(--chip))}
+.chip.soon{background:color-mix(in srgb,var(--e3) 26%,var(--chip))}
+.ringbox{position:relative;width:min(230px,66vw);aspect-ratio:1;max-width:100%;margin:0 auto 10px}
+.ringbox svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ringbox circle{fill:none;stroke-width:9}
+.ring-track{stroke:var(--line)}
+.ring-prog{stroke:var(--ring,var(--accent));stroke-linecap:round;transition:stroke-dashoffset .25s linear}
+.ringtext{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.digits{font:700 3rem/1 var(--num);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.plabel{font-size:.76rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:700}
+.stack{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}
+.note{font-size:.9rem;color:var(--muted);margin:12px auto 0;max-width:34ch}
+
+.btn{font:inherit;font-weight:650;min-height:48px;padding:0 16px;border-radius:12px;border:2px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.btn:active{transform:scale(.98)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.big{min-height:58px;font-size:1.1rem;width:100%}
+.btn.quiet{border-color:transparent;color:var(--muted)}
+.btn.small{min-height:38px;padding:0 12px;font-size:.88rem;border-radius:9px}
+.btn.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.btn:disabled{opacity:.45}
+button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+input[type=text],input[type=date],input[type=number],textarea{font:inherit;color:var(--ink);background:var(--bg);border:2px solid var(--line);border-radius:10px;padding:9px 11px;min-height:44px;max-width:100%}
+input[type=number]{width:74px}
+textarea{width:100%;min-height:140px;resize:vertical}
+
+details.panel{border-top:1px solid var(--line);padding-top:8px}
+details.panel summary{cursor:pointer;font-weight:650;padding:8px 0;min-height:44px;display:flex;align-items:center}
+.list{list-style:none;margin:0;padding:0}
+.item{border-top:1px solid var(--line);padding:11px 0}
+.item:last-child{border-bottom:1px solid var(--line)}
+.item .t{font-weight:600;overflow-wrap:anywhere}
+.item .chips{justify-content:flex-start;margin:4px 0 0}
+.item .acts{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.edit{margin-top:10px;padding:12px;background:var(--chip);border-radius:10px;display:flex;flex-direction:column;gap:10px}
+.edit label{font-size:.8rem;font-weight:700;color:var(--muted);display:block;margin-bottom:4px}
+.edit input[type=text]{width:100%}
+.setgrid{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px 10px;align-items:center;margin:8px 0}
+.setgrid .hd{font-size:.76rem;color:var(--muted);font-weight:700}
+.chk{display:flex;gap:10px;align-items:center;min-height:44px}
+.chk input{width:22px;height:22px;accent-color:var(--accent)}
+.tip{font-size:.85rem;color:var(--muted);margin:8px 0 0}
+.toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20;max-width:90vw;font-weight:600}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="app">
+  <div id="storeWarn" class="banner" hidden>This browser is not letting the page save, so your list will be lost when you close it. Use Show backup in Settings to keep a copy.</div>
+  <header class="top">
+    <h1>Dump and Go</h1>
+    <div class="stats" id="stats" aria-live="polite"></div>
+  </header>
+
+  <div class="energy" id="energy" role="radiogroup" aria-label="Your energy right now"></div>
+  <p class="hint" id="energyHint"></p>
+
+  <section class="card now" id="now" aria-live="polite"></section>
+
+  <details class="panel" id="dumpSec">
+    <summary>Dump tasks</summary>
+    <textarea id="dumpText" aria-label="Tasks, one per line" placeholder="Invoice the Henderson job&#10;Reply to Sam about the quote&#10;Fix the website contact form #medium&#10;File quarterly taxes !"></textarea>
+    <div class="stack" style="margin-top:10px"><button class="btn primary" type="button" data-action="dumpadd">Add them all</button></div>
+    <p class="tip">One task per line. You do not need to sort or size anything. Optional: end a line with <b>#tiny</b>, <b>#small</b>, <b>#medium</b> or <b>#big</b> so low-energy days skip the heavy ones, or put <b>!</b> on anything urgent so it comes up more often.</p>
+  </details>
+
+  <details class="panel" id="waiting"><summary id="waitSum">Waiting</summary><div id="waitBody"></div></details>
+  <details class="panel" id="finished"><summary id="finSum">Finished</summary><div id="finBody"></div></details>
+  <details class="panel" id="settings"><summary>Settings and backup</summary><div id="setBody"></div></details>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+'use strict';
+
+var KEY='focus-dump-v1';
+var SIZES=['tiny','small','medium','big'];
+var SIZE={tiny:{label:'Tiny',hint:'~10 min'},small:{label:'Small',hint:'~25 min'},medium:{label:'Medium',hint:'~1 hr'},big:{label:'Big',hint:'1 hr+'}};
+var ORDER=['empty','low','steady','high'];
+var LV={
+  empty:{name:'Fumes',sub:'Tiny things only, short sprints. Anything you finish counts.',sizes:['tiny'],color:'--e0'},
+  low:{name:'Low',sub:'Small and easy tasks in short sessions.',sizes:['tiny','small'],color:'--e1'},
+  steady:{name:'Steady',sub:'Normal focus. Most tasks are fair game.',sizes:['tiny','small','medium'],color:'--e2'},
+  high:{name:'Charged',sub:'Good moment for the big stuff.',sizes:SIZES,color:'--e3'}
+};
+var BREAKS=['Stand up and stretch.','Drink some water.','Look out a window for a minute.','Walk to another room and back.','Take a few slow breaths.','Refill your coffee or tea.'];
+var DONE_MSGS=['Done. Nice.','That one is off your list.','Finished. That counts.','One less thing.'];
+var RC=2*Math.PI*88;
+
+var storageOK=true;
+var S=load();
+var openRows={};
+var armedKey=null;
+var audioCtx=null,toastTimer=null,wl=null,tickHandle=null;
+
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+function pad(n){return n<10?'0'+n:''+n;}
+function ymd(d){d=d||new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function parseYmd(s){var p=s.split('-');return new Date(+p[0],+p[1]-1,+p[2]);}
+
+function defaults(){
+  return {
+    energy:'steady',
+    mins:{empty:[10,5],low:[15,5],steady:[25,5],high:[45,10]},
+    longEvery:4,longMin:15,sound:true,vibrate:true,auto:false,autoBreak:true,clockAlarm:false,debug:[],pendingTask:null,cycle:0,
+    assigned:null,tasks:[],log:{},
+    timer:{phase:'idle',running:false,total:0,remaining:0,endsAt:null,taskId:null,note:'',early:false}
+  };
+}
+function normalize(d){
+  var base=defaults();
+  if(!d||typeof d!=='object')return base;
+  var s=Object.assign(base,d);
+  s.mins=Object.assign(defaults().mins,d.mins||{});
+  s.tasks=(Array.isArray(d.tasks)?d.tasks:[]).filter(function(t){return t&&t.id&&t.title;}).map(function(t){
+    var x=Object.assign({size:'',sessions:0,done:false,created:Date.now(),due:'',urgent:false},t);
+    if(x.size&&SIZES.indexOf(x.size)<0)x.size='';
+    return x;
+  });
+  s.log=(d.log&&typeof d.log==='object')?d.log:{};
+  s.timer=Object.assign(defaults().timer,d.timer||{});
+  if(ORDER.indexOf(s.energy)<0)s.energy='steady';
+  return s;
+}
+function load(){
+  var raw=null,d=null;
+  try{raw=localStorage.getItem(KEY);}catch(e){storageOK=false;}
+  if(raw){try{d=JSON.parse(raw);}catch(e){d=null;}}
+  return normalize(d);
+}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){storageOK=false;}
+  $('storeWarn').hidden=storageOK;
+}
+
+/* ---------- helpers ---------- */
+function taskById(id){if(!id)return null;for(var i=0;i<S.tasks.length;i++){if(S.tasks[i].id===id)return S.tasks[i];}return null;}
+function openTasks(){return S.tasks.filter(function(t){return !t.done;});}
+function fits(t){return !t.size||LV[S.energy].sizes.indexOf(t.size)>=0;}
+function timerActive(){var p=S.timer.phase;return p==='focus'||p==='break';}
+function durations(){var m=S.mins[S.energy]||[25,5];return {focus:m[0],brk:m[1]};}
+function breakMins(){var long=S.longEvery>0&&S.cycle>0&&S.cycle%S.longEvery===0;return {mins:long?S.longMin:durations().brk,long:long};}
+function dayLog(){var k=ymd();if(!S.log[k])S.log[k]={min:0,sessions:0};return S.log[k];}
+function fmt(ms){var s=Math.max(0,Math.ceil(ms/1000));return Math.floor(s/60)+':'+pad(s%60);}
+function ageDays(t){return Math.floor((Date.now()-t.created)/86400000);}
+function dueInfo(d){
+  if(!d)return null;
+  var diff=Math.round((parseYmd(d)-parseYmd(ymd()))/86400000),text,cls='';
+  if(diff<0){text='Overdue '+(-diff)+'d';cls='over';}
+  else if(diff===0){text='Due today';cls='soon';}
+  else if(diff===1){text='Due tomorrow';cls='soon';}
+  else if(diff<7){text='Due '+parseYmd(d).toLocaleDateString(undefined,{weekday:'long'});}
+  else{text='Due '+parseYmd(d).toLocaleDateString(undefined,{month:'short',day:'numeric'});}
+  return {diff:diff,text:text,cls:cls};
+}
+function toast(msg){var t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.classList.remove('show');},2600);}
+
+/* ---------- random assignment ---------- */
+function weight(t){
+  var w=1,di=dueInfo(t.due);
+  if(di){if(di.diff<0)w+=6;else if(di.diff<=2)w+=4;else if(di.diff<=7)w+=2;}
+  if(t.urgent)w+=5;
+  w+=Math.min(ageDays(t),30)/10;
+  if(t.sessions>0)w+=1;
+  return w;
+}
+function pickRandom(list){
+  var tot=0,ws=list.map(function(t){var w=weight(t);tot+=w;return w;}),r=Math.random()*tot;
+  for(var i=0;i<list.length;i++){r-=ws[i];if(r<=0)return list[i];}
+  return list[list.length-1];
+}
+function assign(excludeId){
+  var o=openTasks();
+  if(!o.length){S.assigned=null;save();return null;}
+  var f=o.filter(fits),list=f.length?f:o;
+  if(excludeId&&list.length>1)list=list.filter(function(t){return t.id!==excludeId;});
+  var t=pickRandom(list);S.assigned=t.id;save();return t;
+}
+function validAssigned(){var t=taskById(S.assigned);return t&&!t.done?t:null;}
+
+/* ---------- sound, vibration, wake lock ---------- */
+function unlockAudio(){
+  try{
+    if(!audioCtx){var AC=window.AudioContext||window.webkitAudioContext;if(AC)audioCtx=new AC();}
+    if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+  }catch(e){}
+}
+var SOUNDS={
+  focus:[{f:659.25,t:0,d:3.2},{f:987.77,t:1,d:3.8}],
+  brk:[{f:293.66,t:0,d:5.2},{f:440,t:0.4,d:5.2}]
+};
+var DECAY={focus:0.9,brk:1.7};
+function tailOf(k){var m=0;SOUNDS[k].forEach(function(n){m=Math.max(m,n.t+n.d);});return m+0.2;}
+var TAIL={focus:tailOf('focus'),brk:tailOf('brk')};
+var SR=8000;
+var player=null,wantPlay=false,urls={},audioState='idle',testTimer=null,endTO=null,lastTick=0;
+var inFrame=(function(){try{return window.self!==window.top;}catch(e){return true;}})();
+
+/* ---- Native Android app: the phone's own alarm system plays the sound, so it works when locked ---- */
+var NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
+var LN=null,nativeSig='',nativePerm='unknown',nativeExact='unknown';
+function nativeSetup(){
+  if(!NATIVE)return;
+  try{
+    LN=Capacitor.registerPlugin('LocalNotifications');
+    LN.createChannel({id:'task_end',name:'Task finished',description:'Plays when a focus session ends',importance:5,sound:'task_done.wav',visibility:1,vibration:true}).catch(function(){});
+    LN.createChannel({id:'break_end',name:'Break finished',description:'Plays when a break ends',importance:5,sound:'break_done.wav',visibility:1,vibration:true}).catch(function(){});
+    nativeCheck(true);
+  }catch(e){logEv('native setup failed: '+e);}
+}
+function nativeCheck(ask){
+  if(!LN)return;
+  var pr=ask?LN.requestPermissions():LN.checkPermissions();
+  pr.then(function(r){
+    nativePerm=r.display;logEv('notification permission: '+r.display);refreshAudioNote();
+    if(LN.checkExactNotificationSetting)LN.checkExactNotificationSetting().then(function(x){nativeExact=x.exact_alarm;logEv('exact alarms: '+x.exact_alarm);}).catch(function(){});
+  }).catch(function(e){logEv('permission check failed: '+(e&&e.message||e));});
+}
+function nativeSync(){
+  if(!NATIVE||!LN)return;
+  var T=S.timer,active=timerActive()&&T.running;
+  var sig=active?(T.phase+'|'+T.endsAt+'|'+S.autoBreak):'off';
+  if(sig===nativeSig)return;
+  nativeSig=sig;
+  LN.cancel({notifications:[{id:1},{id:2}]}).catch(function(){}).then(function(){
+    if(!active)return;
+    var list=[];
+    if(T.phase==='focus'){
+      list.push({id:1,title:'Task session done',body:'Nice work. Take a breath.',channelId:'task_end',schedule:{at:new Date(T.endsAt),allowWhileIdle:true}});
+      if(S.autoBreak){
+        var nc=(S.cycle||0)+1,lg=S.longEvery>0&&nc%S.longEvery===0,bm=lg?S.longMin:durations().brk;
+        list.push({id:2,title:'Break over',body:'Ready when you are.',channelId:'break_end',schedule:{at:new Date(T.endsAt+bm*60000),allowWhileIdle:true}});
+      }
+    }else{
+      list.push({id:2,title:'Break over',body:'Ready when you are.',channelId:'break_end',schedule:{at:new Date(T.endsAt),allowWhileIdle:true}});
+    }
+    list=list.filter(function(n){return n.schedule.at.getTime()>Date.now()+1500;});
+    if(!list.length)return;
+    logEv('alert scheduled for '+list[0].schedule.at.toLocaleTimeString());
+    return LN.schedule({notifications:list});
+  }).catch(function(e){logEv('could not schedule alert: '+(e&&e.message||e));});
+}
+function nativeTest(secs,kind){
+  if(!LN){toast('Not running as the installed Android app.');return;}
+  LN.schedule({notifications:[{id:9,title:kind==='focus'?'Test: task session done':'Test: break over',body:'This is the sound you will hear.',channelId:kind==='focus'?'task_end':'break_end',schedule:{at:new Date(Date.now()+secs*1000),allowWhileIdle:true}}]})
+    .then(function(){logEv('test alert set for '+secs+' s');toast(secs<=5?'Playing in a few seconds.':'Lock your phone now.');})
+    .catch(function(e){toast('Could not set the test alert.');logEv('test alert failed: '+(e&&e.message||e));});
+}
+
+/* ---- diagnostics: a short log you can read in Settings ---- */
+function logEv(m){
+  try{
+    if(!S.debug)S.debug=[];
+    S.debug.push({t:Date.now(),m:m});
+    if(S.debug.length>80)S.debug.splice(0,S.debug.length-80);
+    save();
+  }catch(e){}
+}
+function logLines(){
+  var l=(S.debug||[]).slice(-40).map(function(e){
+    return new Date(e.t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})+'  '+e.m;
+  });
+  return l.length?l.join('\n'):'Nothing logged yet.';
+}
+
+/* ---- sound files, built once and kept ---- */
+function wav16(a){
+  var n=a.length,buf=new ArrayBuffer(44+n*2),v=new DataView(buf);
+  function ws(o,str){for(var i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));}
+  ws(0,'RIFF');v.setUint32(4,36+n*2,true);ws(8,'WAVE');ws(12,'fmt ');
+  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);
+  ws(36,'data');v.setUint32(40,n*2,true);
+  for(var i=0;i<n;i++)v.setInt16(44+i*2,a[i],true);
+  return buf;
+}
+/* Quiet 20 Hz tone, smooth 16-bit, about -50 dB. Phone speakers cannot reproduce 20 Hz, so you hear nothing,
+   but it is not silence, so Android keeps treating this as music playing and keeps the app alive when locked. */
+function bedSamples(){
+  var n=SR*2,a=new Int16Array(n);
+  for(var i=0;i<n;i++)a[i]=Math.round(100*Math.sin(2*Math.PI*20*i/SR));
+  return a;
+}
+function chimeSamples(kind){
+  /* Soft bell: slow attack, long gentle ring, a few quiet overtones and a slightly detuned twin for shimmer. */
+  var notes=SOUNDS[kind],n=Math.ceil(TAIL[kind]*SR),acc=new Float32Array(n),a=new Int16Array(n);
+  var partials=[[1,1],[1.004,0.55],[2,0.28],[3,0.1]];
+  notes.forEach(function(nt){
+    var st=Math.round(nt.t*SR),len=Math.round(nt.d*SR),fade=Math.round(0.08*SR);
+    for(var i=0;i<len&&st+i<n;i++){
+      var tt=i/SR,env=(1-Math.exp(-tt/0.05))*Math.exp(-tt/DECAY[kind])*Math.min(1,(len-i)/fade),w=0;
+      for(var k=0;k<partials.length;k++){var fr=nt.f*partials[k][0];if(fr<SR/2-300)w+=partials[k][1]*Math.sin(2*Math.PI*fr*tt);}
+      acc[st+i]+=w*env;
+    }
+  });
+  var mx=0;for(var j=0;j<n;j++)mx=Math.max(mx,Math.abs(acc[j]));
+  var g=mx>0?0.6/mx:0;
+  for(var q=0;q<n;q++)a[q]=Math.round(acc[q]*g*32767);
+  return a;
+}
+function blobUrl(key){
+  if(!urls[key]){
+    var samples=key==='bed'?bedSamples():chimeSamples(key);
+    urls[key]=URL.createObjectURL(new Blob([wav16(samples)],{type:'audio/wav'}));
+  }
+  return urls[key];
+}
+
+/* ---- the player ---- */
+function getPlayer(){
+  if(!player){
+    player=new Audio();player.preload='auto';
+    ['playing','pause','ended','error','stalled','waiting'].forEach(function(ev){
+      player.addEventListener(ev,function(){
+        logEv('audio '+ev+(ev==='error'&&player.error?' (code '+player.error.code+')':'')+' at '+Math.round(player.currentTime)+'s');
+        if(ev==='pause'&&wantPlay&&S.timer.running&&timerActive()){logEv('the phone paused the sound, retrying');playPlayer();}
+      });
+    });
+  }
+  return player;
+}
+function setMedia(kind){
+  try{
+    if(!('mediaSession' in navigator))return;
+    navigator.mediaSession.metadata=new MediaMetadata({title:kind==='focus'?'Focus session running':'Break running',artist:'Dump and Go'});
+    navigator.mediaSession.setActionHandler('pause',function(){if(S.timer.running)pauseResume();});
+    navigator.mediaSession.setActionHandler('play',function(){if(!S.timer.running&&timerActive())pauseResume();});
+  }catch(e){}
+}
+function audioText(){
+  if(NATIVE){
+    if(nativePerm==='denied')return 'Notifications are off, so there will be no sound. Open Settings and tap Allow notifications.';
+    if(nativePerm==='granted')return 'Alert is set. It will sound at the end, even with your phone locked.';
+    return 'Checking notification permission...';
+  }
+  if(!S.sound)return 'Sound is off in Settings.';
+  if(audioState==='blocked')return 'Your phone blocked the sound. Tap Pause, then Resume, to try again.';
+  if(inFrame)return 'Locked-screen sound may not work inside this view. Open the installed app or Chrome.';
+  if(audioState==='ok')return 'Sound is armed. It will play at the end, even with the screen locked.';
+  return 'Getting the sound ready...';
+}
+function refreshAudioNote(){var n=$('audioNote');if(n)n.textContent=audioText();}
+function playPlayer(){
+  try{
+    var pr=player.play();
+    if(pr&&pr.then){
+      pr.then(function(){audioState='ok';refreshAudioNote();}).catch(function(e){audioState='blocked';logEv('phone refused to play: '+(e&&e.name));refreshAudioNote();});
+    }else{audioState='ok';}
+  }catch(e){audioState='blocked';}
+}
+function startBed(kind){
+  if(NATIVE)return;
+  if(!S.sound){audioState='off';return;}
+  try{
+    var p=getPlayer();
+    p.loop=true;p.src=blobUrl('bed');p.volume=1;
+    blobUrl('focus');blobUrl('brk');
+    wantPlay=true;audioState='arming';
+    setMedia(kind);playPlayer();
+  }catch(e){audioState='blocked';logEv('could not start sound: '+e);}
+}
+function disarm(){wantPlay=false;try{if(player){player.pause();player.loop=false;}}catch(e){}}
+function playChime(kind){
+  wantPlay=false;
+  try{
+    var p=getPlayer();
+    p.loop=false;p.src=blobUrl(kind);p.volume=1;
+    var pr=p.play();
+    if(pr&&pr.then){
+      pr.then(function(){logEv('chime playing ('+(kind==='focus'?'task end':'break end')+')');}).catch(function(e){logEv('chime refused ('+(e&&e.name)+'), using backup tones');playTones(kind);});
+    }
+  }catch(e){logEv('chime error, using backup tones');playTones(kind);}
+}
+function playTones(kind){
+  try{
+    unlockAudio();if(!audioCtx)return;
+    var t0=audioCtx.currentTime+0.02;
+    SOUNDS[kind].forEach(function(n){
+      var o=audioCtx.createOscillator(),g=audioCtx.createGain();
+      o.type='sine';o.frequency.value=n.f;
+      g.gain.setValueAtTime(0.0001,t0+n.t);
+      g.gain.exponentialRampToValueAtTime(0.35,t0+n.t+0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+n.t+n.d);
+      o.connect(g);g.connect(audioCtx.destination);o.start(t0+n.t);o.stop(t0+n.t+n.d+0.05);
+    });
+  }catch(e){}
+}
+function chime(kind){
+  if(NATIVE)return;
+  try{if(S.vibrate&&navigator.vibrate)navigator.vibrate(kind==='focus'?[200]:[300,150,300]);}catch(e){}
+  if(!S.sound)return;
+  playChime(kind);
+}
+function testSound(kind){
+  if(NATIVE){nativeTest(3,kind);return;}
+  if(!S.sound){toast('Turn on the sound setting first.');return;}
+  playChime(kind);
+}
+function setClockTimer(mins,label){
+  try{
+    if(NATIVE)return false;
+    if(!/Android/i.test(navigator.userAgent||''))return false;
+    if(navigator.userActivation&&!navigator.userActivation.isActive)return false;
+    window.location.href='intent:#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH='+Math.max(1,Math.round(mins*60))+';S.android.intent.extra.alarm.MESSAGE='+encodeURIComponent(label)+';B.android.intent.extra.alarm.SKIP_UI=true;end';
+    return true;
+  }catch(e){return false;}
+}
+function lockScreen(){
+  try{
+    if(navigator.wakeLock&&!wl){
+      navigator.wakeLock.request('screen').then(function(l){wl=l;l.addEventListener('release',function(){wl=null;});}).catch(function(){});
+    }
+  }catch(e){}
+}
+function unlockScreen(){try{if(wl){wl.release();wl=null;}}catch(e){}}
+
+/* ---------- timer ---------- */
+function startPhase(phase,mins,taskId,startAt){
+  var t0=startAt||Date.now();
+  unlockAudio();clearTimeout(testTimer);lastTick=0;
+  if(phase==='focus')S.pendingTask=null;
+  S.timer={phase:phase,running:true,total:mins*60000,remaining:mins*60000,endsAt:t0+mins*60000,taskId:taskId||null,note:'',early:false};
+  logEv('started '+(phase==='focus'?'task session':'break')+', '+mins+' min');
+  startBed(phase==='focus'?'focus':'brk');
+  if(S.clockAlarm)setClockTimer(mins,phase==='focus'?'Focus session done':'Break over');
+  save();renderNow();updateTick();
+}
+function startFocus(mins){
+  var t=validAssigned()||assign();
+  startPhase('focus',mins,t?t.id:null);
+}
+function pauseResume(){
+  var T=S.timer;if(!timerActive())return;
+  if(T.running){T.remaining=Math.max(0,T.endsAt-Date.now());T.running=false;T.endsAt=null;disarm();logEv('paused');}
+  else{T.running=true;T.endsAt=Date.now()+T.remaining;lastTick=0;logEv('resumed');startBed(T.phase==='focus'?'focus':'brk');}
+  save();renderNow();updateTick();
+}
+function addTime(mins){
+  var T=S.timer;if(!timerActive())return;
+  T.total+=mins*60000;
+  if(T.running)T.endsAt+=mins*60000;else T.remaining+=mins*60000;
+  logEv('added '+mins+' min');
+  save();renderNow();updateTick();
+}
+function finishFocus(early){
+  var T=S.timer;
+  if(early&&T.running)T.remaining=Math.max(0,T.endsAt-Date.now());
+  var mins=early?Math.max(1,Math.round((T.total-T.remaining)/60000)):Math.round(T.total/60000);
+  var real=!early||mins>=5,l=dayLog();
+  l.min+=mins;if(real)l.sessions+=1;
+  var t=taskById(T.taskId);
+  if(t&&real)t.sessions=(t.sessions||0)+1;
+  if(real)S.cycle=(S.cycle||0)+1;
+  S.pendingTask=T.taskId;
+  S.timer={phase:'focus-done',running:false,total:0,remaining:0,endsAt:null,taskId:T.taskId,note:mins+' min',early:!!early};
+  logEv(early?'wrapped up early':'task session ended');
+  if(early)disarm();else chime('focus');
+  save();renderAll();
+  if(!early&&S.autoBreak){
+    if(NATIVE)startBreak(T.endsAt);
+    else setTimeout(function(){if(S.timer.phase==='focus-done')startBreak();},TAIL.focus*1000);
+  }
+}
+function finishBreak(){
+  S.timer={phase:'break-done',running:false,total:0,remaining:0,endsAt:null,taskId:null,note:'',early:false};
+  logEv('break ended');
+  chime('brk');
+  save();
+  renderAll();
+  if(S.auto&&openTasks().length)setTimeout(function(){if(S.timer.phase==='break-done')startFocus(durations().focus);},TAIL.brk*1000);
+}
+function startBreak(startAt){
+  var bm=breakMins(),tid=S.timer.taskId;
+  if(bm.long)S.cycle=0;
+  startPhase('break',bm.mins,tid,typeof startAt==='number'?startAt:undefined);
+  renderStats();
+}
+function setIdle(){disarm();S.pendingTask=null;S.timer=defaults().timer;save();renderAll();}
+function tick(){
+  var T=S.timer;
+  if(!T.running||!timerActive())return;
+  var now=Date.now();
+  if(lastTick&&now-lastTick>5000)logEv('the app was asleep for '+Math.round((now-lastTick)/1000)+' s');
+  lastTick=now;
+  var rem=T.endsAt-now;
+  if(rem<=0){if(T.phase==='focus')finishFocus(false);else finishBreak();return;}
+  paintTick(rem);
+}
+function paintTick(rem){
+  var T=S.timer,d=$('tDigits'),r=$('tRing');
+  if(d)d.textContent=fmt(rem);
+  if(r)r.style.strokeDashoffset=String(RC*(1-rem/Math.max(1,T.total)));
+  document.title=fmt(rem)+' '+(T.phase==='focus'?'Focus':'Break')+' · Dump and Go';
+}
+function updateTick(){
+  clearTimeout(endTO);
+  nativeSync();
+  if(S.timer.running&&timerActive()){
+    if(!tickHandle)tickHandle=setInterval(tick,250);
+    endTO=setTimeout(tick,Math.max(0,S.timer.endsAt-Date.now())+30);
+    lockScreen();tick();
+  }else{
+    if(tickHandle){clearInterval(tickHandle);tickHandle=null;}
+    lastTick=0;
+    unlockScreen();
+    document.title=timerActive()?'Paused · Dump and Go':'Dump and Go';
+  }
+}
+document.addEventListener('visibilitychange',function(){
+  if(timerActive())logEv(document.hidden?'app hidden (screen off or switched away)':'app visible again');
+  if(!document.hidden&&S.timer.running&&timerActive()){lockScreen();tick();}
+});
+
+/* ---------- task actions ---------- */
+function parseLine(l){
+  l=l.replace(/^\s*(?:[-*•]|\d+[.)])?\s*/,'').trim();
+  var size='',urgent=false,m=l.match(/\s?#(tiny|small|medium|big)\b/i);
+  if(m){size=m[1].toLowerCase();l=l.replace(m[0],'');}
+  l=l.trim();
+  if(/^!\s*\S|\S\s*!$/.test(l)){urgent=true;l=l.replace(/^!\s*|\s*!$/g,'');}
+  return {title:l.trim().slice(0,200),size:size,urgent:urgent};
+}
+function addTask(p){
+  S.tasks.push({id:uid(),title:p.title,size:p.size||'',urgent:!!p.urgent,sessions:0,done:false,created:Date.now(),due:''});
+}
+function completeTask(id){
+  var t=taskById(id);if(!t||t.done)return;
+  t.done=true;t.doneAt=Date.now();
+  if(S.assigned===id)S.assigned=null;
+  save();
+  toast(DONE_MSGS[Math.floor(Math.random()*DONE_MSGS.length)]);
+}
+
+/* ---------- rendering ---------- */
+function renderAll(){
+  var ph=S.timer.phase;
+  if((ph==='idle'||ph==='break-done')&&!validAssigned()&&openTasks().length)assign();
+  renderStats();renderEnergy();renderNow();renderWaiting();renderFinished();
+  if(!openTasks().length&&!timerActive())$('dumpSec').open=true;
+  updateTick();
+}
+function renderStats(){
+  var l=S.log[ymd()]||{min:0,sessions:0};
+  var dn=S.tasks.filter(function(t){return t.done&&t.doneAt&&ymd(new Date(t.doneAt))===ymd();}).length;
+  $('stats').innerHTML='<span><b>'+l.sessions+'</b> '+(l.sessions===1?'session':'sessions')+'</span><span><b>'+Math.round(l.min)+'</b> min</span><span><b>'+dn+'</b> done</span>';
+}
+function renderEnergy(){
+  $('energy').innerHTML=ORDER.map(function(k,i){
+    var bars='';for(var j=0;j<4;j++)bars+='<i class="'+(j<=i?'on':'')+'"></i>';
+    return '<button class="eb" type="button" role="radio" aria-checked="'+(S.energy===k)+'" data-action="energy" data-k="'+k+'" style="--lv:var('+LV[k].color+')"><span class="bat" aria-hidden="true">'+bars+'</span>'+LV[k].name+'</button>';
+  }).join('');
+  var d=durations();
+  $('energyHint').textContent=LV[S.energy].sub+' '+d.focus+' min on, '+d.brk+' min off.';
+}
+function chipsFor(t){
+  var h='';
+  if(t.size)h+='<span class="chip">'+SIZE[t.size].label+'</span>';
+  if(t.urgent)h+='<span class="chip soon">Urgent</span>';
+  var di=dueInfo(t.due);if(di)h+='<span class="chip '+di.cls+'">'+di.text+'</span>';
+  var a=ageDays(t);if(a>=7)h+='<span class="chip">waiting '+a+'d</span>';
+  return h;
+}
+function ring(digits,label,color,offset){
+  return '<div class="ringbox"><svg viewBox="0 0 200 200" aria-hidden="true"><circle class="ring-track" cx="100" cy="100" r="88"></circle>'+
+    '<circle class="ring-prog" id="tRing" cx="100" cy="100" r="88" style="--ring:'+color+';stroke-dasharray:'+RC.toFixed(2)+';stroke-dashoffset:'+offset.toFixed(2)+'"></circle></svg>'+
+    '<div class="ringtext"><div class="digits" id="tDigits">'+digits+'</div><div class="plabel">'+label+'</div></div></div>';
+}
+function renderNow(){
+  var T=S.timer,d=durations(),el=$('now'),open=openTasks(),ph=T.phase;
+  var cur=taskById(T.taskId);if(cur&&cur.done&&ph!=='focus-done')cur=null;
+  var h='';
+  if(ph==='focus'||ph==='break'){
+    var rem=T.running?Math.max(0,T.endsAt-Date.now()):T.remaining;
+    var off=RC*(1-rem/Math.max(1,T.total));
+    if(ph==='focus'){
+      h+=ring(fmt(rem),T.running?'Focus':'Paused','var(--accent)',off);
+      h+=cur?'<p class="label">Right now</p><div class="task">'+esc(cur.title)+'</div>':'<p class="label">Free focus</p>';
+      h+='<div class="stack"><button class="btn primary big" type="button" data-action="tpause">'+(T.running?'Pause':'Resume')+'</button>'+
+         '<div class="row"><button class="btn" type="button" data-action="tplus">+5 min</button><button class="btn" type="button" data-action="twrap">Wrap up early</button><button class="btn quiet" type="button" data-action="tcancel">Cancel</button></div></div>';
+      h+='<p class="note">Too much right now? Wrap up early. The time you did counts.</p><p class="tip" id="audioNote" style="text-align:center">'+esc(audioText())+'</p>';
+    }else{
+      var bm=breakMins();
+      h+=ring(fmt(rem),bm.long?'Long break':'Break','var(--brk)',off);
+      h+='<p class="task" style="font-size:1.2rem">'+esc(BREAKS[(S.cycle||0)%BREAKS.length])+'</p>';
+      var pt=taskById(S.pendingTask);
+      if(pt&&!pt.done)h+='<p class="label">Did you finish</p><div class="task" style="font-size:1.1rem">'+esc(pt.title)+'?</div><div class="row"><button class="btn small" type="button" data-action="finpending">Yes, finished it</button></div>';
+      h+='<div class="stack"><button class="btn primary big" type="button" data-action="tpause">'+(T.running?'Pause':'Resume')+'</button><button class="btn quiet" type="button" data-action="tskipbreak">Skip break</button></div><p class="tip" id="audioNote" style="text-align:center">'+esc(audioText())+'</p>';
+    }
+    el.innerHTML=h;return;
+  }
+  if(ph==='focus-done'){
+    h+=ring('Done',T.early?'Wrapped up':'Session done','var(--brk)',0);
+    if(cur){
+      h+='<p class="label">Did you finish this?</p><div class="task">'+esc(cur.title)+'</div>';
+      h+='<div class="stack"><button class="btn primary big" type="button" data-action="finished">Yes, finished it</button><button class="btn big" type="button" data-action="still">Not yet, still going</button>'+
+         '<div class="row"><button class="btn quiet" type="button" data-action="tmore">Keep going 10 more</button><button class="btn quiet" type="button" data-action="tidle">Done for now</button></div></div>';
+    }else{
+      h+='<div class="stack"><button class="btn primary big" type="button" data-action="still">Start break</button><button class="btn quiet" type="button" data-action="tidle">Done for now</button></div>';
+    }
+    h+='<p class="note">'+esc(T.note)+' logged. '+(T.early?'Stopping early still counts.':'Nice work.')+'</p>';
+    el.innerHTML=h;return;
+  }
+  /* idle or break-done */
+  if(!open.length){
+    el.innerHTML='<p class="label">Nothing waiting</p><div class="task">Your list is empty.</div><p class="note" style="margin-top:0">Open <b>Dump tasks</b> below and paste everything in. I will hand you one at a time.</p>';
+    return;
+  }
+  var t=validAssigned(),peek=t&&!fits(t);
+  var startMin=peek?10:d.focus;
+  h+=ring(startMin+':00',ph==='break-done'?'Break over':'Ready','var(--line)',0);
+  var pend=ph==='break-done'?taskById(S.pendingTask):null;
+  if(pend&&!pend.done)h+='<p class="label">Did you finish</p><div class="task" style="font-size:1.1rem">'+esc(pend.title)+'?</div><div class="row" style="margin-bottom:10px"><button class="btn small" type="button" data-action="finpending">Yes, finished it</button></div>';
+  if(t){
+    h+='<p class="label">'+(ph==='break-done'?'Your next task':'Your task')+'</p><div class="task">'+esc(t.title)+'</div><div class="chips">'+chipsFor(t)+'</div>';
+    h+='<div class="stack"><button class="btn primary big" type="button" data-action="tstart" data-m="'+startMin+'">Start '+startMin+'-min '+(peek?'peek':'focus')+'</button>';
+    h+='<div class="row">'+(startMin!==10?'<button class="btn" type="button" data-action="tstart" data-m="10">Just 10 minutes</button>':'')+'<button class="btn quiet" type="button" data-action="swap">Give me a different one</button></div></div>';
+    h+='<p class="note">'+(peek?'Nothing here is small enough for this battery level, so this is just a short peek.':'No deciding needed. Starting is the only job.')+'</p>';
+  }
+  el.innerHTML=h;
+}
+function itemHTML(t){
+  var o=!!openRows[t.id];
+  var h='<li class="item"><div class="t">'+esc(t.title)+'</div><div class="chips">'+chipsFor(t)+'</div><div class="acts">'+
+    '<button class="btn small" type="button" data-action="donenow" data-id="'+t.id+'">Done</button>'+
+    '<button class="btn small quiet" type="button" data-action="toggle" data-id="'+t.id+'" aria-expanded="'+o+'">'+(o?'Close':'Edit')+'</button></div>';
+  if(o){
+    h+='<div class="edit"><div><label for="ed-t-'+t.id+'">Name</label><input type="text" id="ed-t-'+t.id+'" value="'+esc(t.title)+'" data-edit="title" data-id="'+t.id+'" maxlength="200"></div>'+
+      '<div><label>Size</label><div class="row" style="justify-content:flex-start;gap:6px"><button class="btn small'+(!t.size?' on':'')+'" type="button" data-action="setsize" data-id="'+t.id+'" data-size="">Any</button>'+
+      SIZES.map(function(s){return '<button class="btn small'+(t.size===s?' on':'')+'" type="button" data-action="setsize" data-id="'+t.id+'" data-size="'+s+'">'+SIZE[s].label+'</button>';}).join('')+'</div></div>'+
+      '<div><label for="ed-d-'+t.id+'">Due date</label><input type="date" id="ed-d-'+t.id+'" value="'+esc(t.due||'')+'" data-edit="due" data-id="'+t.id+'"></div>'+
+      '<div class="row" style="justify-content:flex-start"><button class="btn small'+(t.urgent?' on':'')+'" type="button" data-action="urgent" data-id="'+t.id+'" aria-pressed="'+!!t.urgent+'">Urgent</button><button class="btn small quiet" type="button" data-action="taskdel" data-id="'+t.id+'">Delete</button></div></div>';
+  }
+  return h+'</li>';
+}
+function renderWaiting(){
+  var o=openTasks().sort(function(a,b){return a.created-b.created;});
+  $('waitSum').textContent='Waiting ('+o.length+')';
+  $('waitBody').innerHTML=o.length?'<p class="tip" style="margin-top:0">You never have to read this list. It is here if you want to edit something.</p><ul class="list">'+o.map(itemHTML).join('')+'</ul>':'<p class="muted">Nothing waiting.</p>';
+}
+function renderFinished(){
+  var done=S.tasks.filter(function(t){return t.done;}).sort(function(a,b){return (b.doneAt||0)-(a.doneAt||0);});
+  $('finSum').textContent='Finished ('+done.length+')';
+  if(!done.length){$('finBody').innerHTML='<p class="muted">Nothing finished yet. Your wins will collect here.</p>';return;}
+  $('finBody').innerHTML='<ul class="list">'+done.slice(0,30).map(function(t){
+    return '<li class="item"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><span class="muted" style="min-width:0;overflow-wrap:anywhere">'+esc(t.title)+'</span><button class="btn small quiet" type="button" data-action="undo" data-id="'+t.id+'">Undo</button></div></li>';
+  }).join('')+'</ul><div style="margin-top:8px"><button class="btn small quiet" type="button" data-action="clearfin">Clear finished list</button></div>';
+}
+function renderSettings(){
+  var rows=ORDER.map(function(k){
+    var m=S.mins[k];
+    return '<div>'+LV[k].name+'</div><input type="number" inputmode="numeric" min="1" max="180" value="'+m[0]+'" data-set="mins" data-k="'+k+'" data-i="0" aria-label="'+LV[k].name+' focus minutes"><input type="number" inputmode="numeric" min="1" max="60" value="'+m[1]+'" data-set="mins" data-k="'+k+'" data-i="1" aria-label="'+LV[k].name+' break minutes">';
+  }).join('');
+  $('setBody').innerHTML=
+    '<p class="tip" style="margin-top:0">Session lengths for each battery level, in minutes.</p>'+
+    '<div class="setgrid"><span class="hd">Battery</span><span class="hd">Focus</span><span class="hd">Break</span>'+rows+'</div>'+
+    '<div class="row" style="justify-content:flex-start;margin:6px 0 10px"><label class="row" style="gap:8px">Long break every <input type="number" inputmode="numeric" min="0" max="12" value="'+S.longEvery+'" data-set="longEvery" aria-label="Long break every N sessions"> sessions</label><label class="row" style="gap:8px">lasting <input type="number" inputmode="numeric" min="1" max="90" value="'+S.longMin+'" data-set="longMin" aria-label="Long break minutes"> min</label></div>'+
+    '<label class="chk"><input type="checkbox" data-set="autoBreak" '+(S.autoBreak?'checked':'')+'> Start the break automatically when a task session ends</label>'+
+    '<label class="chk"><input type="checkbox" data-set="auto" '+(S.auto?'checked':'')+'> Start the next task automatically after a break</label>'+
+    (NATIVE?'<p class="tip" style="margin-top:0">This installed app uses your phone\'s own alarm system, so the chime plays even when the phone is locked. Allow notifications, and allow exact alarms so it is on time.</p><div class="row" style="justify-content:flex-start;margin:2px 0 8px"><button class="btn small" type="button" data-action="nativeperm">Allow notifications</button><button class="btn small" type="button" data-action="nativeexact">Allow exact alarms</button></div>':'')+
+    '<label class="chk"><input type="checkbox" data-set="sound" '+(S.sound?'checked':'')+'> Play a sound when a timer ends</label>'+
+    '<div class="row" style="justify-content:flex-start;margin:2px 0 6px"><button class="btn small" type="button" data-action="testsound" data-k="focus">Hear task-end sound</button><button class="btn small" type="button" data-action="testsound" data-k="brk">Hear break-end sound</button></div>'+
+    '<div class="row" style="justify-content:flex-start;margin:2px 0 6px"><button class="btn small" type="button" data-action="locktest" data-s="15">Lock test 15 s</button><button class="btn small" type="button" data-action="locktest" data-s="120">Lock test 2 min</button><button class="btn small" type="button" data-action="locktest" data-s="300">Lock test 5 min</button></div>'+
+    '<p class="tip" style="margin-top:0">Tap one, lock your phone straight away, and wait. The task-end chime plays when time is up.</p>'+
+    '<label class="chk"><input type="checkbox" data-set="clockAlarm" '+(S.clockAlarm?'checked':'')+'> Also set a timer in the phone Clock app (backup, experimental)</label>'+
+    '<div class="row" style="justify-content:flex-start;margin:2px 0 6px"><button class="btn small" type="button" data-action="clocktest">Test Clock timer (15 s)</button></div>'+
+    '<p class="tip">The Clock timer rings loudly even when locked, but it uses your Clock app\'s own sound, cannot be cancelled if you wrap up early, and only sets when you tap Start yourself.</p>'+
+    '<label class="chk"><input type="checkbox" data-set="vibrate" '+(S.vibrate?'checked':'')+'> Vibrate when a timer ends</label>'+
+    '<p class="tip">Task end is a bright rising chime. Break end is a low, slow, descending tone, repeated three times. Sounds play as media, so turn your phone\'s media volume up. You can lock the screen during a session, but leave this app open and do not swipe it away.</p>'+
+    '<h2 style="margin-top:18px">What the phone did last time</h2>'+
+    '<p class="tip" style="margin-top:0">If the sound does not play, copy this log and send it to me.</p>'+
+    '<textarea id="logText" readonly aria-label="Diagnostic log" style="min-height:130px;font-size:.8rem">'+esc(logLines())+'</textarea>'+
+    '<div class="row" style="justify-content:flex-start;margin-top:8px"><button class="btn small" type="button" data-action="copylog">Copy log</button><button class="btn small quiet" type="button" data-action="clearlog">Clear log</button></div>'+
+    '<h2 style="margin-top:18px">Backup</h2>'+
+    '<p class="tip" style="margin-top:0">Your list is saved in this browser. To keep a copy or move to another device, tap Show backup, copy the text, and paste it somewhere safe. To restore, paste it back and tap Restore.</p>'+
+    '<textarea id="backupText" aria-label="Backup text" style="min-height:90px;margin-top:8px" placeholder="Backup text appears here. Paste a backup here to restore."></textarea>'+
+    '<div class="row" style="justify-content:flex-start;margin-top:8px"><button class="btn small" type="button" data-action="showbackup">Show backup</button><button class="btn small" type="button" data-action="restore">Restore</button><button class="btn small quiet" type="button" data-action="reset">Erase everything</button></div>';
+}
+
+/* ---------- events ---------- */
+function arm(key,btn,msg){
+  if(armedKey===key)return true;
+  armedKey=key;var orig=btn.textContent;btn.textContent=msg;
+  setTimeout(function(){if(armedKey===key){armedKey=null;if(btn.isConnected)btn.textContent=orig;}},3500);
+  return false;
+}
+document.addEventListener('click',function(e){
+  var b=e.target.closest&&e.target.closest('[data-action]');
+  if(!b||b.tagName==='INPUT')return;
+  act(b.dataset.action,b);
+});
+document.addEventListener('change',function(e){
+  var el=e.target;
+  if(el.dataset&&el.dataset.edit){
+    var t=taskById(el.dataset.id);if(!t)return;
+    if(el.dataset.edit==='title'){var v=el.value.trim();if(v)t.title=v;}
+    if(el.dataset.edit==='due')t.due=el.value||'';
+    save();renderAll();return;
+  }
+  if(el.dataset&&el.dataset.set){
+    var k=el.dataset.set;
+    if(k==='mins'){var n=Math.max(1,Math.min(180,parseInt(el.value,10)||1));S.mins[el.dataset.k][+el.dataset.i]=n;el.value=n;}
+    else if(k==='longEvery'){S.longEvery=Math.max(0,Math.min(12,parseInt(el.value,10)||0));el.value=S.longEvery;}
+    else if(k==='longMin'){S.longMin=Math.max(1,Math.min(90,parseInt(el.value,10)||15));el.value=S.longMin;}
+    else if(k==='sound'){S.sound=el.checked;if(el.checked)unlockAudio();else disarm();}
+    else if(k==='vibrate'){S.vibrate=el.checked;}
+    else if(k==='auto'){S.auto=el.checked;}
+    else if(k==='autoBreak'){S.autoBreak=el.checked;}
+    else if(k==='clockAlarm'){S.clockAlarm=el.checked;}
+    save();
+    if(k==='mins'){renderEnergy();if(S.timer.phase==='idle'||S.timer.phase==='break-done')renderNow();}
+  }
+});
+
+function act(a,b){
+  var id=b.dataset?b.dataset.id:null,t=id?taskById(id):null;
+  switch(a){
+    case 'energy':
+      S.energy=b.dataset.k;
+      if(!timerActive()){var cur=validAssigned();if(cur&&!fits(cur)&&openTasks().some(fits))assign();}
+      save();renderAll();break;
+    case 'dumpadd':{
+      var lines=$('dumpText').value.split(/\r?\n/).map(parseLine).filter(function(p){return p.title;});
+      if(!lines.length){$('dumpText').focus();break;}
+      lines.forEach(addTask);
+      $('dumpText').value='';
+      save();renderAll();
+      $('dumpSec').open=false;
+      toast('Added '+lines.length+' '+(lines.length===1?'task':'tasks')+'.');
+      break;
+    }
+    case 'tstart':startFocus(parseInt(b.dataset.m,10)||durations().focus);renderWaiting();break;
+    case 'swap':{var c=validAssigned();assign(c?c.id:null);renderNow();break;}
+    case 'tpause':pauseResume();break;
+    case 'tplus':addTime(5);break;
+    case 'twrap':finishFocus(true);break;
+    case 'tcancel':
+      if(arm('tcancel',b,'Tap again to cancel')){armedKey=null;setIdle();}
+      break;
+    case 'finished':{var ft=taskById(S.timer.taskId);if(ft)completeTask(ft.id);startBreak();renderAll();break;}
+    case 'still':startBreak();renderAll();break;
+    case 'tmore':startPhase('focus',10,S.timer.taskId);break;
+    case 'tskipbreak':disarm();S.timer={phase:'break-done',running:false,total:0,remaining:0,endsAt:null,taskId:null,note:'',early:false};save();renderAll();break;
+    case 'tidle':setIdle();break;
+    case 'finpending':{var fp=taskById(S.pendingTask);if(fp)completeTask(fp.id);S.pendingTask=null;save();renderAll();break;}
+    case 'locktest':{
+      if(timerActive()){toast('Stop the timer first.');break;}
+      if(!S.sound){toast('Turn on the sound setting first.');break;}
+      var secs=parseInt(b.dataset.s,10)||15;
+      if(NATIVE){nativeTest(secs,'focus');break;}
+      clearTimeout(testTimer);
+      logEv('lock test started, '+secs+' s');
+      startBed('focus');
+      testTimer=setTimeout(function(){logEv('lock test time is up');playChime('focus');},secs*1000);
+      toast('Lock your phone now. The chime plays in '+(secs<60?secs+' seconds':Math.round(secs/60)+' min')+'.');
+      break;
+    }
+    case 'copylog':{
+      var lt=$('logText');if(lt){lt.focus();lt.select();}
+      try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(logLines()).then(function(){toast('Log copied.');}).catch(function(){toast('Select the text and copy it.');});}else toast('Select the text and copy it.');}catch(e){toast('Select the text and copy it.');}
+      break;
+    }
+    case 'clearlog':S.debug=[];save();renderSettings();toast('Log cleared.');break;
+    case 'nativeperm':nativeCheck(true);toast('Check the permission prompt.');break;
+    case 'nativeexact':try{LN.changeExactNotificationSetting().catch(function(){});}catch(e){}break;
+    case 'clocktest':
+      if(!setClockTimer(0.25,'Dump and Go test'))toast('This only works in Chrome or the installed app on Android.');
+      else toast('If a 15 second Clock timer was set, it will ring when done.');
+      break;
+    case 'testsound':if(timerActive()){toast('Stop the timer first.');}else testSound(b.dataset.k);break;
+    case 'donenow':if(t){completeTask(t.id);renderAll();}break;
+    case 'toggle':if(t){openRows[t.id]=!openRows[t.id];renderWaiting();}break;
+    case 'setsize':if(t){t.size=b.dataset.size||'';save();renderAll();}break;
+    case 'urgent':if(t){t.urgent=!t.urgent;save();renderAll();}break;
+    case 'taskdel':
+      if(t&&arm('del'+t.id,b,'Tap again to delete')){S.tasks=S.tasks.filter(function(x){return x.id!==t.id;});if(S.assigned===t.id)S.assigned=null;armedKey=null;save();renderAll();}
+      break;
+    case 'undo':if(t){t.done=false;delete t.doneAt;save();renderAll();}break;
+    case 'clearfin':
+      if(arm('clearfin',b,'Tap again to clear')){S.tasks=S.tasks.filter(function(x){return !x.done;});armedKey=null;save();renderAll();}
+      break;
+    case 'showbackup':{
+      var ta=$('backupText');ta.value=JSON.stringify(S);ta.focus();ta.select();
+      try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(ta.value).then(function(){toast('Backup copied.');}).catch(function(){toast('Select the text and copy it.');});}else toast('Select the text and copy it.');}catch(e){toast('Select the text and copy it.');}
+      break;
+    }
+    case 'restore':
+      try{
+        var d=JSON.parse($('backupText').value);
+        if(!d||!Array.isArray(d.tasks))throw new Error('bad');
+        S=normalize(d);openRows={};save();renderAll();renderSettings();
+        toast('Restored '+S.tasks.length+' tasks.');
+      }catch(e){toast('That is not a valid backup.');}
+      break;
+    case 'reset':
+      if(arm('reset',b,'Tap again to erase everything')){armedKey=null;S=defaults();openRows={};save();renderAll();renderSettings();toast('Everything erased.');}
+      break;
+  }
+}
+
+/* ---------- boot ---------- */
+nativeSetup();
+renderSettings();
+$('settings').addEventListener('toggle',function(){if($('settings').open)renderSettings();});
+$('storeWarn').hidden=storageOK;
+(function resume(){
+  var T=S.timer;
+  if(timerActive()&&T.running&&T.endsAt&&T.endsAt<=Date.now()){
+    if(T.phase==='focus')finishFocus(false);else finishBreak();
+    return;
+  }
+  renderAll();
+})();
+setInterval(renderStats,60000);
+})();
+</script>
+
+</body></html>
