@@ -260,11 +260,13 @@ var LN=null,nativeSig='',nativePerm='unknown',nativeExact='unknown';
 function nativeSetup(){
   if(!NATIVE)return;
   try{
-    LN=Capacitor.registerPlugin('LocalNotifications');
-    LN.createChannel({id:'task_end',name:'Task finished',description:'Plays when a focus session ends',importance:5,sound:'task_done.wav',visibility:1,vibration:true}).catch(function(){});
-    LN.createChannel({id:'break_end',name:'Break finished',description:'Plays when a break ends',importance:5,sound:'break_done.wav',visibility:1,vibration:true}).catch(function(){});
+    LN=window.DGLocalNotifications||(Capacitor.registerPlugin&&Capacitor.registerPlugin('LocalNotifications'))||(Capacitor.Plugins&&Capacitor.Plugins.LocalNotifications)||null;
+    if(!LN){logEv('native setup failed: alert plugin not found');return;}
+    logEv('native app detected, alert plugin ready');
+    LN.createChannel({id:'task_end',name:'Task finished',description:'Plays when a focus session ends',importance:5,sound:'task_done.wav',visibility:1,vibration:true}).catch(function(e){logEv('channel error: '+(e&&e.message||e));});
+    LN.createChannel({id:'break_end',name:'Break finished',description:'Plays when a break ends',importance:5,sound:'break_done.wav',visibility:1,vibration:true}).catch(function(e){logEv('channel error: '+(e&&e.message||e));});
     nativeCheck(true);
-  }catch(e){logEv('native setup failed: '+e);}
+  }catch(e){LN=null;logEv('native setup failed: '+e);}
 }
 function nativeCheck(ask){
   if(!LN)return;
@@ -299,7 +301,7 @@ function nativeSync(){
   }).catch(function(e){logEv('could not schedule alert: '+(e&&e.message||e));});
 }
 function nativeTest(secs,kind){
-  if(!LN){toast('Not running as the installed Android app.');return;}
+  if(!LN){toast('The alert plugin did not start. Open Settings and send me the log.');return;}
   LN.schedule({notifications:[{id:9,title:kind==='focus'?'Test: task session done':'Test: break over',body:'This is the sound you will hear.',channelId:kind==='focus'?'task_end':'break_end',schedule:{at:new Date(Date.now()+secs*1000),allowWhileIdle:true}}]})
     .then(function(){logEv('test alert set for '+secs+' s');toast(secs<=5?'Playing in a few seconds.':'Lock your phone now.');})
     .catch(function(e){toast('Could not set the test alert.');logEv('test alert failed: '+(e&&e.message||e));});
