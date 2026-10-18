@@ -160,7 +160,7 @@ function defaults(){
   return {
     energy:'steady',
     mins:{empty:[10,5],low:[15,5],steady:[25,5],high:[45,10]},
-    longEvery:4,longMin:15,sound:true,vibrate:true,auto:false,autoBreak:true,clockAlarm:false,debug:[],pendingTask:null,cycle:0,
+    longEvery:4,longMin:15,sound:true,vibrate:true,auto:false,autoBreak:true,clockAlarm:false,nativeSound:'custom',debug:[],pendingTask:null,cycle:0,
     assigned:null,tasks:[],log:{},
     timer:{phase:'idle',running:false,total:0,remaining:0,endsAt:null,taskId:null,note:'',early:false}
   };
@@ -257,6 +257,7 @@ var inFrame=(function(){try{return window.self!==window.top;}catch(e){return tru
 /* ---- Native Android app: the phone's own alarm system plays the sound, so it works when locked ---- */
 var NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
 var LN=null,nativeSig='',nativePerm='unknown',nativeExact='unknown';
+function chId(kind){return (S.nativeSound==='default'?'dflt_':'')+(kind==='focus'?'task_end':'break_end');}
 function nativeSetup(){
   if(!NATIVE)return;
   try{
@@ -265,6 +266,8 @@ function nativeSetup(){
     logEv('native app detected, alert plugin ready');
     LN.createChannel({id:'task_end',name:'Task finished',description:'Plays when a focus session ends',importance:5,sound:'task_done.wav',visibility:1,vibration:true}).catch(function(e){logEv('channel error: '+(e&&e.message||e));});
     LN.createChannel({id:'break_end',name:'Break finished',description:'Plays when a break ends',importance:5,sound:'break_done.wav',visibility:1,vibration:true}).catch(function(e){logEv('channel error: '+(e&&e.message||e));});
+    LN.createChannel({id:'dflt_task_end',name:'Task finished (phone default sound)',description:'Uses your phone default notification sound',importance:5,visibility:1,vibration:true}).catch(function(){});
+    LN.createChannel({id:'dflt_break_end',name:'Break finished (phone default sound)',description:'Uses your phone default notification sound',importance:5,visibility:1,vibration:true}).catch(function(){});
     nativeCheck(true);
   }catch(e){LN=null;logEv('native setup failed: '+e);}
 }
@@ -286,13 +289,13 @@ function nativeSync(){
     if(!active)return;
     var list=[];
     if(T.phase==='focus'){
-      list.push({id:1,title:'Task session done',body:'Nice work. Take a breath.',channelId:'task_end',schedule:{at:new Date(T.endsAt),allowWhileIdle:true}});
+      list.push({id:1,title:'Task session done',body:'Nice work. Take a breath.',channelId:chId('focus'),schedule:{at:new Date(T.endsAt),allowWhileIdle:true}});
       if(S.autoBreak){
         var nc=(S.cycle||0)+1,lg=S.longEvery>0&&nc%S.longEvery===0,bm=lg?S.longMin:durations().brk;
-        list.push({id:2,title:'Break over',body:'Ready when you are.',channelId:'break_end',schedule:{at:new Date(T.endsAt+bm*60000),allowWhileIdle:true}});
+        list.push({id:2,title:'Break over',body:'Ready when you are.',channelId:chId('brk'),schedule:{at:new Date(T.endsAt+bm*60000),allowWhileIdle:true}});
       }
     }else{
-      list.push({id:2,title:'Break over',body:'Ready when you are.',channelId:'break_end',schedule:{at:new Date(T.endsAt),allowWhileIdle:true}});
+      list.push({id:2,title:'Break over',body:'Ready when you are.',channelId:chId('brk'),schedule:{at:new Date(T.endsAt),allowWhileIdle:true}});
     }
     list=list.filter(function(n){return n.schedule.at.getTime()>Date.now()+1500;});
     if(!list.length)return;
@@ -302,7 +305,7 @@ function nativeSync(){
 }
 function nativeTest(secs,kind){
   if(!LN){toast('The alert plugin did not start. Open Settings and send me the log.');return;}
-  LN.schedule({notifications:[{id:9,title:kind==='focus'?'Test: task session done':'Test: break over',body:'This is the sound you will hear.',channelId:kind==='focus'?'task_end':'break_end',schedule:{at:new Date(Date.now()+secs*1000),allowWhileIdle:true}}]})
+  LN.schedule({notifications:[{id:9,title:kind==='focus'?'Test: task session done':'Test: break over',body:'This is the sound you will hear.',channelId:chId(kind),schedule:{at:new Date(Date.now()+secs*1000),allowWhileIdle:true}}]})
     .then(function(){logEv('test alert set for '+secs+' s');toast(secs<=5?'Playing in a few seconds.':'Lock your phone now.');})
     .catch(function(e){toast('Could not set the test alert.');logEv('test alert failed: '+(e&&e.message||e));});
 }
@@ -717,6 +720,7 @@ function renderSettings(){
     '<label class="chk"><input type="checkbox" data-set="autoBreak" '+(S.autoBreak?'checked':'')+'> Start the break automatically when a task session ends</label>'+
     '<label class="chk"><input type="checkbox" data-set="auto" '+(S.auto?'checked':'')+'> Start the next task automatically after a break</label>'+
     (NATIVE?'<p class="tip" style="margin-top:0">This installed app uses your phone\'s own alarm system, so the chime plays even when the phone is locked. Allow notifications, and allow exact alarms so it is on time.</p><div class="row" style="justify-content:flex-start;margin:2px 0 8px"><button class="btn small" type="button" data-action="nativeperm">Allow notifications</button><button class="btn small" type="button" data-action="nativeexact">Allow exact alarms</button></div>':'')+
+    (NATIVE?'<p class="tip" style="margin:0 0 4px">Alert sound (try both if you hear nothing):</p><div class="row" style="justify-content:flex-start;margin:2px 0 8px"><button class="btn small'+(S.nativeSound!=='default'?' on':'')+'" type="button" data-action="nativesound" data-k="custom">Calm bells</button><button class="btn small'+(S.nativeSound==='default'?' on':'')+'" type="button" data-action="nativesound" data-k="default">Phone default sound</button></div>':'')+
     '<label class="chk"><input type="checkbox" data-set="sound" '+(S.sound?'checked':'')+'> Play a sound when a timer ends</label>'+
     '<div class="row" style="justify-content:flex-start;margin:2px 0 6px"><button class="btn small" type="button" data-action="testsound" data-k="focus">Hear task-end sound</button><button class="btn small" type="button" data-action="testsound" data-k="brk">Hear break-end sound</button></div>'+
     '<div class="row" style="justify-content:flex-start;margin:2px 0 6px"><button class="btn small" type="button" data-action="locktest" data-s="15">Lock test 15 s</button><button class="btn small" type="button" data-action="locktest" data-s="120">Lock test 2 min</button><button class="btn small" type="button" data-action="locktest" data-s="300">Lock test 5 min</button></div>'+
@@ -820,6 +824,7 @@ function act(a,b){
       break;
     }
     case 'clearlog':S.debug=[];save();renderSettings();toast('Log cleared.');break;
+    case 'nativesound':S.nativeSound=b.dataset.k==='default'?'default':'custom';nativeSig='';save();logEv('alert sound: '+S.nativeSound);updateTick();renderSettings();toast(S.nativeSound==='default'?'Using your phone default sound.':'Using the calm bells.');break;
     case 'nativeperm':nativeCheck(true);toast('Check the permission prompt.');break;
     case 'nativeexact':try{LN.changeExactNotificationSetting().catch(function(){});}catch(e){}break;
     case 'clocktest':
