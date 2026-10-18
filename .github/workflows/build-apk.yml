@@ -26,6 +26,13 @@ jobs:
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager --licenses > /dev/null || true
 
+      - name: Find the app file
+        run: |
+          mkdir -p www
+          if [ ! -f www/index.html ]; then cp index.html www/index.html; fi
+          test -f www/index.html && echo "Found the app file"
+          ls -l www
+
       - name: Install packages
         run: npm install
 
